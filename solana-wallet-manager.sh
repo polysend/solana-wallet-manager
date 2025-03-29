@@ -291,35 +291,82 @@ create_token() {
     local token_decimals="$3"
     
     if [ -z "$CURRENT_WALLET" ]; then
-        echo -e "${RED}Error: No wallet selected. Use 'use-wallet <name>' first${NC}"
+        echo -e "${RED}Error: No wallet selected. Use 'use-wallet <n>' first${NC}"
         return 1
     fi
     
     local wallet_dir="$WALLETS_DIR/$CURRENT_WALLET"
+    local wallet_keypair="$wallet_dir/keypair.json"
     
     echo -e "${BLUE}Creating new token: $token_name ($token_symbol) with $token_decimals decimals${NC}"
     
-    # Create token mint
-    local token_output=$(spl-token create-token --decimals "$token_decimals" -k "$wallet_dir/keypair.json")
-    local token_address=$(echo "$token_output" | grep "Creating token" | awk '{print $3}')
+    # Create tokens directory if it doesn't exist
+    mkdir -p "$wallet_dir/tokens"
     
-    if [ -z "$token_address" ]; then
-        echo -e "${RED}Failed to create token${NC}"
+    # Create a token-specific keypair file that we'll keep
+    local token_keypair_file="$wallet_dir/tokens/${token_symbol}_keypair.json"
+    
+    # Create token keypair
+    echo -e "${BLUE}Generating token keypair...${NC}"
+    solana-keygen new -o "$token_keypair_file" --no-bip39-passphrase --force
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to generate token keypair${NC}"
         return 1
     fi
     
-    echo -e "${GREEN}Created token: $token_address${NC}"
+    # Get the token keypair public key - this will be the token address
+    local token_address=$(solana-keygen pubkey "$token_keypair_file")
+    echo -e "${BLUE}Token keypair public key: $token_address${NC}"
     
-    # Store token info
-    mkdir -p "$wallet_dir/tokens"
-    echo "{\"name\":\"$token_name\",\"symbol\":\"$token_symbol\",\"decimals\":$token_decimals,\"address\":\"$token_address\"}" > "$wallet_dir/tokens/$token_symbol.json"
+    # Save current Solana configuration
+    echo -e "${BLUE}Saving current Solana configuration...${NC}"
+    local current_keypair
+    current_keypair=$(solana config get keypair -o json 2>/dev/null || echo "none")
     
-    # Create token account
-    echo -e "${BLUE}Creating token account...${NC}"
-    spl-token create-account "$token_address" -k "$wallet_dir/keypair.json"
+    # Set wallet keypair as default
+    echo -e "${BLUE}Setting wallet keypair as default...${NC}"
+    solana config set --keypair "$wallet_keypair"
     
-    echo -e "${GREEN}Token created successfully: $token_name ($token_symbol)${NC}"
-    echo -e "Token address: $token_address"
+    # Create the token 
+    echo -e "${BLUE}Creating token...${NC}"
+    local token_output
+    token_output=$(spl-token create-token --decimals "$token_decimals" "$token_keypair_file" 2>&1)
+    local token_status=$?
+    
+    if [ $token_status -eq 0 ]; then
+        # Token created successfully
+        echo -e "${GREEN}Token created successfully!${NC}"
+        echo -e "${GREEN}Token address: $token_address${NC}"
+        
+        # Store token info
+        echo "{\"name\":\"$token_name\",\"symbol\":\"$token_symbol\",\"decimals\":$token_decimals,\"address\":\"$token_address\",\"keypair\":\"${token_symbol}_keypair.json\"}" > "$wallet_dir/tokens/$token_symbol.json"
+        echo -e "${GREEN}Token information saved to $wallet_dir/tokens/$token_symbol.json${NC}"
+        
+        # Create token account
+        echo -e "${BLUE}Creating token account...${NC}"
+        local account_output
+        account_output=$(spl-token create-account "$token_address" 2>&1)
+        
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}Token account created successfully!${NC}"
+        else
+            echo -e "${YELLOW}Failed to create token account: $account_output${NC}"
+            echo -e "${YELLOW}You may need to create a token account manually${NC}"
+        fi
+    else
+        echo -e "${RED}Token creation failed${NC}"
+        echo -e "Error: $token_output"
+    fi
+    
+    # Restore original configuration if it existed
+    if [ "$current_keypair" != "none" ]; then
+        echo -e "${BLUE}Restoring original Solana configuration...${NC}"
+        local original_keypair=$(echo "$current_keypair" | grep -o '"keypair":"[^"]*"' | cut -d '"' -f 4)
+        solana config set --keypair "$original_keypair"
+    fi
+    
+    return $token_status
 }
 
 # Function to mint tokens
@@ -333,39 +380,78 @@ mint_token() {
     local amount="$2"
     local recipient="${3:-$CURRENT_WALLET}"
     local token_address=""
+    local token_keypair_file=""
     
     if [ -z "$CURRENT_WALLET" ]; then
         echo -e "${RED}Error: No wallet selected. Use 'use-wallet <name>' first${NC}"
         return 1
     fi
     
+    local wallet_dir="$WALLETS_DIR/$CURRENT_WALLET"
+    local wallet_keypair="$wallet_dir/keypair.json"
+    
     # Check if token is a symbol or direct address
-    if [ -f "$WALLETS_DIR/$CURRENT_WALLET/tokens/$token.json" ]; then
-        token_address=$(cat "$WALLETS_DIR/$CURRENT_WALLET/tokens/$token.json" | grep -o '"address":"[^"]*"' | cut -d '"' -f 4)
+    if [ -f "$wallet_dir/tokens/$token.json" ]; then
+        local token_info=$(cat "$wallet_dir/tokens/$token.json")
+        token_address=$(echo "$token_info" | grep -o '"address":"[^"]*"' | cut -d '"' -f 4)
+        token_keypair=$(echo "$token_info" | grep -o '"keypair":"[^"]*"' | cut -d '"' -f 4)
+        token_keypair_file="$wallet_dir/tokens/$token_keypair"
     else
         # Assume it's already an address
         token_address="$token"
+        echo -e "${YELLOW}Warning: Using direct token address without keypair file${NC}"
     fi
     
     local recipient_address=""
     
-    # Check if recipient is a wallet name or a direct address
+    # Check if recipient is a wallet name
     if [ -d "$WALLETS_DIR/$recipient" ] && [ -f "$WALLETS_DIR/$recipient/keypair.json" ]; then
         recipient_address=$(solana address -k "$WALLETS_DIR/$recipient/keypair.json")
+        echo -e "${BLUE}Using wallet as recipient: $recipient - $recipient_address${NC}"
     else
         # Assume it's already an address
         recipient_address="$recipient"
+        echo -e "${BLUE}Using direct address as recipient: $recipient_address${NC}"
     fi
     
     echo -e "${BLUE}Minting $amount $token tokens to $recipient_address${NC}"
-    spl-token mint "$token_address" "$amount" -k "$WALLETS_DIR/$CURRENT_WALLET/keypair.json" --owner "$WALLETS_DIR/$CURRENT_WALLET/keypair.json"
     
-    if [ $? -eq 0 ]; then
+    # Save current Solana configuration
+    echo -e "${BLUE}Saving current Solana configuration...${NC}"
+    local current_keypair
+    current_keypair=$(solana config get keypair -o json 2>/dev/null || echo "none")
+    
+    # Set wallet keypair as default
+    echo -e "${BLUE}Setting wallet keypair as default...${NC}"
+    solana config set --keypair "$wallet_keypair"
+    
+    # Mint tokens
+    local mint_output
+    if [ -n "$token_keypair_file" ] && [ -f "$token_keypair_file" ]; then
+        echo -e "${BLUE}Minting with token authority...${NC}"
+        mint_output=$(spl-token mint "$token_address" "$amount" 2>&1)
+    else
+        echo -e "${BLUE}Minting without token authority (this may fail if you are not the mint authority)...${NC}"
+        mint_output=$(spl-token mint "$token_address" "$amount" 2>&1)
+    fi
+    
+    local mint_status=$?
+    
+    if [ $mint_status -eq 0 ]; then
         echo -e "${GREEN}Token minting successful${NC}"
     else
         echo -e "${RED}Token minting failed${NC}"
-        return 1
+        echo -e "Error: $mint_output"
     fi
+    
+    # Restore original configuration if it existed
+    if [ "$current_keypair" != "none" ]; then
+        echo -e "${BLUE}Restoring original Solana configuration...${NC}"
+        local original_keypair=$(echo "$current_keypair" | grep -o '"keypair":"[^"]*"' | cut -d '"' -f 4)
+        solana config set --keypair "$original_keypair"
+    fi
+    
+    return $mint_status
 }
 
 # Function to transfer tokens between wallets
@@ -385,9 +471,12 @@ transfer_token() {
         return 1
     fi
     
+    local wallet_dir="$WALLETS_DIR/$CURRENT_WALLET"
+    local wallet_keypair="$wallet_dir/keypair.json"
+    
     # Check if token is a symbol or direct address
-    if [ -f "$WALLETS_DIR/$CURRENT_WALLET/tokens/$token.json" ]; then
-        token_address=$(cat "$WALLETS_DIR/$CURRENT_WALLET/tokens/$token.json" | grep -o '"address":"[^"]*"' | cut -d '"' -f 4)
+    if [ -f "$wallet_dir/tokens/$token.json" ]; then
+        token_address=$(cat "$wallet_dir/tokens/$token.json" | grep -o '"address":"[^"]*"' | cut -d '"' -f 4)
     else
         # Assume it's already an address
         token_address="$token"
@@ -395,23 +484,77 @@ transfer_token() {
     
     local recipient_address=""
     
-    # Check if recipient is a wallet name or a direct address
+    # Check if recipient is a wallet name
     if [ -d "$WALLETS_DIR/$recipient" ] && [ -f "$WALLETS_DIR/$recipient/keypair.json" ]; then
         recipient_address=$(solana address -k "$WALLETS_DIR/$recipient/keypair.json")
+        echo -e "${BLUE}Using wallet as recipient: $recipient - $recipient_address${NC}"
     else
         # Assume it's already an address
         recipient_address="$recipient"
+        echo -e "${BLUE}Using direct address as recipient: $recipient_address${NC}"
     fi
     
     echo -e "${BLUE}Transferring $amount $token tokens from $CURRENT_WALLET to $recipient_address${NC}"
-    spl-token transfer --allow-unfunded-recipient "$token_address" "$amount" "$recipient_address" -k "$WALLETS_DIR/$CURRENT_WALLET/keypair.json"
     
-    if [ $? -eq 0 ]; then
+    # Save current Solana configuration
+    echo -e "${BLUE}Saving current Solana configuration...${NC}"
+    local current_keypair
+    current_keypair=$(solana config get keypair -o json 2>/dev/null || echo "none")
+    
+    # Set wallet keypair as default
+    echo -e "${BLUE}Setting wallet keypair as default...${NC}"
+    solana config set --keypair "$wallet_keypair"
+    
+    # Transfer tokens with --fund-recipient flag to automatically create the token account
+    echo -e "${BLUE}Attempting transfer with automatic recipient account funding...${NC}"
+    local transfer_output
+    transfer_output=$(spl-token transfer --allow-unfunded-recipient --fund-recipient "$token_address" "$amount" "$recipient_address" 2>&1)
+    local transfer_status=$?
+    
+    if [ $transfer_status -eq 0 ]; then
         echo -e "${GREEN}Token transfer successful${NC}"
     else
         echo -e "${RED}Token transfer failed${NC}"
-        return 1
+        echo -e "Error: $transfer_output"
+        
+        # If that fails, try to create the account first
+        echo -e "${YELLOW}Trying to create the recipient's token account first...${NC}"
+        
+        # Save current wallet address
+        local current_wallet_address=$(solana address -k "$wallet_keypair")
+        
+        # Try to create the associated token account for the recipient
+        local create_output
+        create_output=$(spl-token create-account "$token_address" "$recipient_address" --fund-recipient 2>&1)
+        
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}Successfully created token account for recipient${NC}"
+            
+            # Try transfer again
+            echo -e "${BLUE}Attempting transfer again...${NC}"
+            transfer_output=$(spl-token transfer "$token_address" "$amount" "$recipient_address" 2>&1)
+            transfer_status=$?
+            
+            if [ $transfer_status -eq 0 ]; then
+                echo -e "${GREEN}Token transfer successful${NC}"
+            else
+                echo -e "${RED}Token transfer failed after creating account${NC}"
+                echo -e "Error: $transfer_output"
+            fi
+        else
+            echo -e "${RED}Failed to create token account for recipient${NC}"
+            echo -e "Error: $create_output"
+        fi
     fi
+    
+    # Restore original configuration if it existed
+    if [ "$current_keypair" != "none" ]; then
+        echo -e "${BLUE}Restoring original Solana configuration...${NC}"
+        local original_keypair=$(echo "$current_keypair" | grep -o '"keypair":"[^"]*"' | cut -d '"' -f 4)
+        solana config set --keypair "$original_keypair"
+    fi
+    
+    return $transfer_status
 }
 
 # Function to list tokens owned by a wallet
@@ -424,20 +567,41 @@ list_tokens() {
     fi
     
     local wallet_dir="$WALLETS_DIR/$wallet_name"
+    local wallet_keypair="$wallet_dir/keypair.json"
     
-    if [ ! -d "$wallet_dir" ] || [ ! -f "$wallet_dir/keypair.json" ]; then
+    if [ ! -d "$wallet_dir" ] || [ ! -f "$wallet_keypair" ]; then
         echo -e "${RED}Error: Wallet '$wallet_name' not found${NC}"
         return 1
     fi
     
     echo -e "${BLUE}Tokens owned by wallet: $wallet_name${NC}"
-    spl-token accounts -k "$wallet_dir/keypair.json"
+    
+    # Save current Solana configuration
+    echo -e "${BLUE}Saving current Solana configuration...${NC}"
+    local current_keypair
+    current_keypair=$(solana config get keypair -o json 2>/dev/null || echo "none")
+    
+    # Set wallet keypair as default
+    echo -e "${BLUE}Setting wallet keypair as default...${NC}"
+    solana config set --keypair "$wallet_keypair"
+    
+    # List token accounts
+    local accounts_output
+    accounts_output=$(spl-token accounts 2>&1)
+    local accounts_status=$?
+    
+    if [ $accounts_status -eq 0 ]; then
+        echo "$accounts_output"
+    else
+        echo -e "${RED}Failed to list token accounts${NC}"
+        echo -e "Error: $accounts_output"
+    fi
     
     # Also list token info if available
     if [ -d "$wallet_dir/tokens" ] && [ "$(ls -A $wallet_dir/tokens 2>/dev/null)" ]; then
         echo -e "\n${BLUE}Tokens created by this wallet:${NC}"
         for token_file in "$wallet_dir/tokens"/*.json; do
-            if [ -f "$token_file" ]; then
+            if [ -f "$token_file" ] && [[ "$token_file" != *"_keypair.json" ]]; then
                 local token_info=$(cat "$token_file")
                 local token_name=$(echo "$token_info" | grep -o '"name":"[^"]*"' | cut -d '"' -f 4)
                 local token_symbol=$(echo "$token_info" | grep -o '"symbol":"[^"]*"' | cut -d '"' -f 4)
@@ -448,6 +612,15 @@ list_tokens() {
             fi
         done
     fi
+    
+    # Restore original configuration if it existed
+    if [ "$current_keypair" != "none" ]; then
+        echo -e "${BLUE}Restoring original Solana configuration...${NC}"
+        local original_keypair=$(echo "$current_keypair" | grep -o '"keypair":"[^"]*"' | cut -d '"' -f 4)
+        solana config set --keypair "$original_keypair"
+    fi
+    
+    return $accounts_status
 }
 
 # Fix the CURRENT_WALLET env variable if it's not persisting
