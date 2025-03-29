@@ -22,7 +22,7 @@ A comprehensive bash script for managing Solana wallets, addresses, tokens, and 
 1. Download the script:
 
 ```bash
-curl -O https://raw.githubusercontent.com/yourusername/solana-wallet-manager/main/solana-wallet-manager.sh
+curl -O https://raw.githubusercontent.com/polysend/solana-wallet-manager/main/solana-wallet-manager.sh
 ```
 
 2. Make it executable:
