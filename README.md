@@ -37,7 +37,7 @@ chmod +x solana-wallet-manager.sh
 sudo mv solana-wallet-manager.sh /usr/local/bin/solana-wallet-manager
 ```
 
-## Usage
+## Setup and Configuration
 
 ### Setting Up a Local Validator
 
@@ -97,6 +97,8 @@ You can also change the cluster at runtime without modifying the script:
 
 
 This snippet provides clear instructions for customizing the two most important environment settings: the wallet directory location and the default cluster URL.
+
+## Usage
 
 ### Basic Commands
 
