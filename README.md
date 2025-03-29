@@ -95,9 +95,6 @@ You can also change the cluster at runtime without modifying the script:
 ./solana-wallet-manager.sh set-cluster devnet
 ```
 
-
-This snippet provides clear instructions for customizing the two most important environment settings: the wallet directory location and the default cluster URL.
-
 ## Usage
 
 ### Basic Commands
