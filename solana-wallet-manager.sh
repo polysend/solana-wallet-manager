@@ -41,6 +41,7 @@ show_help() {
     echo "  set-cluster <cluster>             - Set cluster (local, devnet, testnet, mainnet)"
     echo "  show-cluster                      - Show current cluster"
     echo "  transfer <amount> <recipient>     - Transfer SOL from current wallet to recipient"
+    echo "  transfer-with-memo <amount> <recipient> <memo> - Transfer SOL with memo"
     echo "  create-token <name> <symbol> <decimals> - Create a new SPL token"
     echo "  mint-token <token> <amount> [recipient] - Mint tokens to current or specified wallet"
     echo "  transfer-token <token> <amount> <recipient> - Transfer tokens from current wallet"
@@ -191,7 +192,7 @@ set_cluster() {
     
     case "$cluster" in
         "local")
-            url="http://localhost:8899"
+            url="http://192.168.1.119:8899"
             ;;
         "devnet")
             url="https://api.devnet.solana.com"
@@ -275,6 +276,46 @@ transfer_sol() {
         show_balance "$CURRENT_WALLET"
     else
         echo -e "${RED}Transfer failed${NC}"
+        return 1
+    fi
+}
+
+
+# Function to transfer SOL with a memo
+transfer_sol_with_memo() {
+    if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ]; then
+        echo -e "${RED}Error: Amount, recipient, and memo are required${NC}"
+        return 1
+    fi
+    
+    local amount="$1"
+    local recipient="$2"
+    local memo="$3"
+    local recipient_address=""
+    
+    if [ -z "$CURRENT_WALLET" ]; then
+        echo -e "${RED}Error: No wallet selected. Use 'use-wallet <name>' first${NC}"
+        return 1
+    fi
+    
+    # Check if recipient is a wallet name or a direct address
+    if [ -d "$WALLETS_DIR/$recipient" ] && [ -f "$WALLETS_DIR/$recipient/keypair.json" ]; then
+        recipient_address=$(solana address -k "$WALLETS_DIR/$recipient/keypair.json")
+    else
+        # Assume it's already an address
+        recipient_address="$recipient"
+    fi
+    
+    echo -e "${BLUE}Transferring $amount SOL from $CURRENT_WALLET to $recipient_address with memo: \"$memo\"${NC}"
+    
+    # Use solana transfer with --with-memo flag
+    solana transfer --allow-unfunded-recipient -k "$WALLETS_DIR/$CURRENT_WALLET/keypair.json" "$recipient_address" "$amount" --with-memo "$memo"
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Transfer with memo successful${NC}"
+        show_balance "$CURRENT_WALLET"
+    else
+        echo -e "${RED}Transfer with memo failed${NC}"
         return 1
     fi
 }
@@ -695,6 +736,9 @@ case "$1" in
         ;;
     "transfer")
         transfer_sol "$2" "$3"
+        ;;
+    "transfer-with-memo")
+        transfer_sol_with_memo "$2" "$3" "$4"
         ;;
     "create-token")
         create_token "$2" "$3" "$4"
