@@ -404,23 +404,50 @@ mint_token() {
     local token_keypair_file=""
     
     if [ -z "$CURRENT_WALLET" ]; then
-        echo -e "${RED}Error: No wallet selected. Use 'use-wallet <name>' first${NC}"
+        echo -e "${RED}Error: No wallet selected. Use 'use-wallet <n>' first${NC}"
         return 1
     fi
     
     local wallet_dir="$WALLETS_DIR/$CURRENT_WALLET"
     local wallet_keypair="$wallet_dir/keypair.json"
     
+    echo -e "${BLUE}Debug: Looking for token '$token' in wallet '$CURRENT_WALLET'${NC}"
+    echo -e "${BLUE}Debug: Checking file: $wallet_dir/tokens/$token.json${NC}"
+    
     # Check if token is a symbol or direct address
     if [ -f "$wallet_dir/tokens/$token.json" ]; then
-        local token_info=$(cat "$wallet_dir/tokens/$token.json")
-        token_address=$(echo "$token_info" | grep -o '"address":"[^"]*"' | cut -d '"' -f 4)
-        token_keypair=$(echo "$token_info" | grep -o '"keypair":"[^"]*"' | cut -d '"' -f 4)
-        token_keypair_file="$wallet_dir/tokens/$token_keypair"
+        echo -e "${GREEN}Debug: Found token file${NC}"
+        
+        # Try jq first (safer)
+        if command -v jq >/dev/null 2>&1; then
+            token_address=$(jq -r '.address' "$wallet_dir/tokens/$token.json" 2>/dev/null)
+            local token_keypair=$(jq -r '.keypair' "$wallet_dir/tokens/$token.json" 2>/dev/null)
+        else
+            # Fallback to grep
+            local token_info=$(cat "$wallet_dir/tokens/$token.json")
+            token_address=$(echo "$token_info" | grep -o '"address":"[^"]*"' | cut -d '"' -f 4)
+            local token_keypair=$(echo "$token_info" | grep -o '"keypair":"[^"]*"' | cut -d '"' -f 4)
+        fi
+        
+        echo -e "${BLUE}Debug: Extracted token_address='$token_address'${NC}"
+        echo -e "${BLUE}Debug: Extracted token_keypair='$token_keypair'${NC}"
+        
+        if [ -n "$token_keypair" ]; then
+            token_keypair_file="$wallet_dir/tokens/$token_keypair"
+            echo -e "${BLUE}Debug: Token keypair file: $token_keypair_file${NC}"
+        fi
     else
+        echo -e "${YELLOW}Debug: Token file not found, assuming direct address${NC}"
         # Assume it's already an address
         token_address="$token"
         echo -e "${YELLOW}Warning: Using direct token address without keypair file${NC}"
+    fi
+    
+    # Validate token address
+    if [ -z "$token_address" ]; then
+        echo -e "${RED}Error: Could not determine token address for '$token'${NC}"
+        echo -e "${RED}Check if the token exists with: ./solana-wallet-manager.sh list-tokens${NC}"
+        return 1
     fi
     
     local recipient_address=""
@@ -436,6 +463,7 @@ mint_token() {
     fi
     
     echo -e "${BLUE}Minting $amount $token tokens to $recipient_address${NC}"
+    echo -e "${BLUE}Debug: Token address to mint: $token_address${NC}"
     
     # Save current Solana configuration
     echo -e "${BLUE}Saving current Solana configuration...${NC}"
@@ -449,7 +477,7 @@ mint_token() {
     # Mint tokens
     local mint_output
     if [ -n "$token_keypair_file" ] && [ -f "$token_keypair_file" ]; then
-        echo -e "${BLUE}Minting with token authority...${NC}"
+        echo -e "${BLUE}Minting with token authority using keypair: $token_keypair_file${NC}"
         mint_output=$(spl-token mint "$token_address" "$amount" 2>&1)
     else
         echo -e "${BLUE}Minting without token authority (this may fail if you are not the mint authority)...${NC}"
@@ -473,109 +501,6 @@ mint_token() {
     fi
     
     return $mint_status
-}
-
-# Function to transfer tokens between wallets
-transfer_token() {
-    if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ]; then
-        echo -e "${RED}Error: Token, amount, and recipient are required${NC}"
-        return 1
-    fi
-    
-    local token="$1"
-    local amount="$2"
-    local recipient="$3"
-    local token_address=""
-    
-    if [ -z "$CURRENT_WALLET" ]; then
-        echo -e "${RED}Error: No wallet selected. Use 'use-wallet <name>' first${NC}"
-        return 1
-    fi
-    
-    local wallet_dir="$WALLETS_DIR/$CURRENT_WALLET"
-    local wallet_keypair="$wallet_dir/keypair.json"
-    
-    # Check if token is a symbol or direct address
-    if [ -f "$wallet_dir/tokens/$token.json" ]; then
-        token_address=$(cat "$wallet_dir/tokens/$token.json" | grep -o '"address":"[^"]*"' | cut -d '"' -f 4)
-    else
-        # Assume it's already an address
-        token_address="$token"
-    fi
-    
-    local recipient_address=""
-    
-    # Check if recipient is a wallet name
-    if [ -d "$WALLETS_DIR/$recipient" ] && [ -f "$WALLETS_DIR/$recipient/keypair.json" ]; then
-        recipient_address=$(solana address -k "$WALLETS_DIR/$recipient/keypair.json")
-        echo -e "${BLUE}Using wallet as recipient: $recipient - $recipient_address${NC}"
-    else
-        # Assume it's already an address
-        recipient_address="$recipient"
-        echo -e "${BLUE}Using direct address as recipient: $recipient_address${NC}"
-    fi
-    
-    echo -e "${BLUE}Transferring $amount $token tokens from $CURRENT_WALLET to $recipient_address${NC}"
-    
-    # Save current Solana configuration
-    echo -e "${BLUE}Saving current Solana configuration...${NC}"
-    local current_keypair
-    current_keypair=$(solana config get keypair -o json 2>/dev/null || echo "none")
-    
-    # Set wallet keypair as default
-    echo -e "${BLUE}Setting wallet keypair as default...${NC}"
-    solana config set --keypair "$wallet_keypair"
-    
-    # Transfer tokens with --fund-recipient flag to automatically create the token account
-    echo -e "${BLUE}Attempting transfer with automatic recipient account funding...${NC}"
-    local transfer_output
-    transfer_output=$(spl-token transfer --allow-unfunded-recipient --fund-recipient "$token_address" "$amount" "$recipient_address" 2>&1)
-    local transfer_status=$?
-    
-    if [ $transfer_status -eq 0 ]; then
-        echo -e "${GREEN}Token transfer successful${NC}"
-    else
-        echo -e "${RED}Token transfer failed${NC}"
-        echo -e "Error: $transfer_output"
-        
-        # If that fails, try to create the account first
-        echo -e "${YELLOW}Trying to create the recipient's token account first...${NC}"
-        
-        # Save current wallet address
-        local current_wallet_address=$(solana address -k "$wallet_keypair")
-        
-        # Try to create the associated token account for the recipient
-        local create_output
-        create_output=$(spl-token create-account "$token_address" "$recipient_address" --fund-recipient 2>&1)
-        
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}Successfully created token account for recipient${NC}"
-            
-            # Try transfer again
-            echo -e "${BLUE}Attempting transfer again...${NC}"
-            transfer_output=$(spl-token transfer "$token_address" "$amount" "$recipient_address" 2>&1)
-            transfer_status=$?
-            
-            if [ $transfer_status -eq 0 ]; then
-                echo -e "${GREEN}Token transfer successful${NC}"
-            else
-                echo -e "${RED}Token transfer failed after creating account${NC}"
-                echo -e "Error: $transfer_output"
-            fi
-        else
-            echo -e "${RED}Failed to create token account for recipient${NC}"
-            echo -e "Error: $create_output"
-        fi
-    fi
-    
-    # Restore original configuration if it existed
-    if [ "$current_keypair" != "none" ]; then
-        echo -e "${BLUE}Restoring original Solana configuration...${NC}"
-        local original_keypair=$(echo "$current_keypair" | grep -o '"keypair":"[^"]*"' | cut -d '"' -f 4)
-        solana config set --keypair "$original_keypair"
-    fi
-    
-    return $transfer_status
 }
 
 # Function to list tokens owned by a wallet
@@ -622,14 +547,41 @@ list_tokens() {
     if [ -d "$wallet_dir/tokens" ] && [ "$(ls -A $wallet_dir/tokens 2>/dev/null)" ]; then
         echo -e "\n${BLUE}Tokens created by this wallet:${NC}"
         for token_file in "$wallet_dir/tokens"/*.json; do
+            # Skip keypair files
             if [ -f "$token_file" ] && [[ "$token_file" != *"_keypair.json" ]]; then
-                local token_info=$(cat "$token_file")
-                local token_name=$(echo "$token_info" | grep -o '"name":"[^"]*"' | cut -d '"' -f 4)
-                local token_symbol=$(echo "$token_info" | grep -o '"symbol":"[^"]*"' | cut -d '"' -f 4)
-                local token_decimals=$(echo "$token_info" | grep -o '"decimals":[^,}]*' | cut -d ':' -f 2)
-                local token_address=$(echo "$token_info" | grep -o '"address":"[^"]*"' | cut -d '"' -f 4)
-                
-                echo -e "${GREEN}$token_name ($token_symbol)${NC} - Decimals: $token_decimals - Address: $token_address"
+                # Check if file is valid JSON and has required fields
+                if command -v jq >/dev/null 2>&1; then
+                    # Use jq for safer parsing
+                    local token_name=$(jq -r '.name // "Unknown"' "$token_file" 2>/dev/null)
+                    local token_symbol=$(jq -r '.symbol // "Unknown"' "$token_file" 2>/dev/null)
+                    local token_decimals=$(jq -r '.decimals // "Unknown"' "$token_file" 2>/dev/null)
+                    local token_address=$(jq -r '.address // "Unknown"' "$token_file" 2>/dev/null)
+                    
+                    # Only display if we got valid values
+                    if [ "$token_name" != "null" ] && [ "$token_symbol" != "null" ] && [ "$token_address" != "null" ] && [ "$token_name" != "Unknown" ]; then
+                        echo -e "${GREEN}$token_name ($token_symbol)${NC} - Decimals: $token_decimals - Address: $token_address"
+                    else
+                        echo -e "${YELLOW}Skipping corrupted file: $(basename "$token_file")${NC}"
+                    fi
+                else
+                    # Fallback to grep if jq is not available (less safe but works)
+                    local token_info
+                    if token_info=$(cat "$token_file" 2>/dev/null); then
+                        local token_name=$(echo "$token_info" | grep -o '"name":"[^"]*"' | cut -d '"' -f 4)
+                        local token_symbol=$(echo "$token_info" | grep -o '"symbol":"[^"]*"' | cut -d '"' -f 4)
+                        local token_decimals=$(echo "$token_info" | grep -o '"decimals":[^,}]*' | cut -d ':' -f 2 | tr -d ' ')
+                        local token_address=$(echo "$token_info" | grep -o '"address":"[^"]*"' | cut -d '"' -f 4)
+                        
+                        # Only display if we got valid values (not empty and not containing special chars that indicate corruption)
+                        if [ -n "$token_name" ] && [ -n "$token_symbol" ] && [ -n "$token_address" ] && [[ "$token_decimals" =~ ^[0-9]+$ ]]; then
+                            echo -e "${GREEN}$token_name ($token_symbol)${NC} - Decimals: $token_decimals - Address: $token_address"
+                        else
+                            echo -e "${YELLOW}Skipping corrupted file: $(basename "$token_file")${NC}"
+                        fi
+                    else
+                        echo -e "${YELLOW}Cannot read file: $(basename "$token_file")${NC}"
+                    fi
+                fi
             fi
         done
     fi
@@ -967,8 +919,6 @@ EOF
     echo "$metadata_json"
 }
 
-# Add these functions to your script after the create_token_metadata() function
-
 # Function to create token with full metadata
 create_token_with_metadata() {
     if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ]; then
@@ -1123,7 +1073,6 @@ show_token_metadata() {
 }
 
 
-# Main command parser
 fix_current_wallet
 
 # Main command parser
