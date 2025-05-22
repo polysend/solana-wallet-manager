@@ -44,7 +44,7 @@ show_help() {
     echo "  airdrop <amount> [name]           - Airdrop SOL to current or specified wallet"
     echo ""
     echo "Network Commands:"
-    echo "  set-cluster <cluster>             - Set cluster (local, devnet, testnet, mainnet)"
+    echo "  set-cluster <cluster>             - Set cluster (local, devnet, testnet, mainnet or custom url)"
     echo "  show-cluster                      - Show current cluster"
     echo "  check-cluster                     - Check if current cluster is available"
     echo ""

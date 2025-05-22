@@ -165,6 +165,13 @@ The script defaults to local validator (`http://localhost:8899`). To change the 
 You can also change the cluster at runtime without modifying the script:
 ```bash
 ./solana-wallet-manager.sh set-cluster devnet
+./solana-wallet-manager.sh set-cluster testnet
+./solana-wallet-manager.sh set-cluster mainnet
+./solana-wallet-manager.sh set-cluster local
+
+# Or use a custom RPC URL directly
+./solana-wallet-manager.sh set-cluster https://my-custom-rpc.com
+./solana-wallet-manager.sh set-cluster http://192.168.1.100:8899
 ```
 
 ## Usage
@@ -430,7 +437,23 @@ Available clusters:
 - `devnet` - Solana Devnet (https://api.devnet.solana.com)
 - `testnet` - Solana Testnet (https://api.testnet.solana.com)
 - `mainnet` - Solana Mainnet (https://api.mainnet-beta.solana.com)
-- Any custom URL
+- **Custom URL** - Any custom RPC endpoint (e.g., `https://my-rpc.com`, `http://192.168.1.100:8899`)
+
+### Examples of Custom Cluster Usage
+
+```bash
+# Switch to a custom RPC provider
+./solana-wallet-manager.sh set-cluster https://my-custom-rpc.solana.com
+
+# Use a local validator on a different port
+./solana-wallet-manager.sh set-cluster http://localhost:8900
+
+# Connect to a validator on your local network
+./solana-wallet-manager.sh set-cluster http://192.168.1.119:8899
+
+# Verify the cluster is working
+./solana-wallet-manager.sh check-cluster
+```
 
 ## Technical Implementation Details
 
