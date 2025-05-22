@@ -926,84 +926,104 @@ create_token_with_metadata() {
         echo "Usage: create-token-with-metadata <name> <symbol> <decimals> [image_path] [description] [external_url]"
         return 1
     fi
-    
+
     local token_name="$1"
     local token_symbol="$2"
     local token_decimals="$3"
     local image_path="$4"
     local description="${5:-A custom token created with Solana Wallet Manager}"
     local external_url="$6"
-    
+
     if [ -z "$CURRENT_WALLET" ]; then
         echo -e "${RED}Error: No wallet selected. Use 'use-wallet <name>' first${NC}"
         return 1
     fi
-    
+
     local wallet_dir="$WALLETS_DIR/$CURRENT_WALLET"
     local image_uri=""
-    
+
     echo -e "${BLUE}Creating token with metadata...${NC}"
-    
-    # Step 1: Upload image if provided
+
+    # Upload image to IPFS
     if [ -n "$image_path" ] && [ -f "$image_path" ]; then
-        echo -e "${BLUE}Step 1: Uploading image to IPFS...${NC}"
+        echo -e "${BLUE}Uploading image to IPFS...${NC}"
         local image_hash=$(upload_to_ipfs "$image_path" "$token_symbol-image")
         if [ $? -eq 0 ]; then
-            image_uri="$IPFS_GATEWAY_URL/ipfs/$image_hash"
+            image_uri="https://ipfs.io/ipfs/$image_hash"
             echo -e "${GREEN}Image uploaded: $image_uri${NC}"
         else
-            echo -e "${YELLOW}Warning: Failed to upload image, continuing without image${NC}"
+            echo -e "${YELLOW}Warning: Failed to upload image. Continuing without image URI${NC}"
         fi
-    else
-        echo -e "${YELLOW}No image provided, creating token without image${NC}"
     fi
-    
-    # Step 2: Create and upload metadata JSON
-    echo -e "${BLUE}Step 2: Creating and uploading metadata JSON...${NC}"
+
+    # Create metadata JSON and upload to IPFS
+    echo -e "${BLUE}Creating metadata JSON...${NC}"
     local metadata_json=$(create_token_metadata "$token_name" "$token_symbol" "$description" "$image_uri" "$external_url")
     local metadata_hash=$(upload_text_to_ipfs "$metadata_json" "${token_symbol}_metadata.json" "$token_symbol-metadata")
-    
+
     if [ $? -ne 0 ]; then
         echo -e "${RED}Failed to upload metadata to IPFS${NC}"
         return 1
     fi
-    
-    local metadata_uri="$IPFS_GATEWAY_URL/ipfs/$metadata_hash"
-    echo -e "${GREEN}Metadata uploaded: $metadata_uri${NC}"
-    
-    # Step 3: Create the SPL token
-    echo -e "${BLUE}Step 3: Creating SPL token...${NC}"
-    
-    # First create the basic token (reuse existing function logic)
+
+    local metadata_uri="https://ipfs.io/ipfs/$metadata_hash"
+    echo -e "${GREEN}Metadata URI: $metadata_uri${NC}"
+
+    # Generate token keypair
     mkdir -p "$wallet_dir/tokens"
     local token_keypair_file="$wallet_dir/tokens/${token_symbol}_keypair.json"
-    
-    # Generate token keypair
-    solana-keygen new -o "$token_keypair_file" --no-bip39-passphrase --force
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}Failed to generate token keypair${NC}"
-        return 1
-    fi
-    
+    solana-keygen new -o "$token_keypair_file" --no-bip39-passphrase --force || return 1
     local token_address=$(solana-keygen pubkey "$token_keypair_file")
-    
-    # Save current Solana configuration and set wallet keypair
+
+    # Create token
+    echo -e "${BLUE}Creating SPL token...${NC}"
     local current_keypair=$(solana config get keypair -o json 2>/dev/null || echo "none")
     solana config set --keypair "$wallet_dir/keypair.json"
-    
-    # Create the token
-    local token_output=$(spl-token create-token --decimals "$token_decimals" "$token_keypair_file" 2>&1)
-    local token_status=$?
-    
-    if [ $token_status -eq 0 ]; then
-        echo -e "${GREEN}SPL Token created successfully!${NC}"
-        echo -e "${GREEN}Token address: $token_address${NC}"
-        
-        # Create token account
-        spl-token create-account "$token_address" 2>/dev/null
-        
-        # Store enhanced token info with metadata
-        cat > "$wallet_dir/tokens/$token_symbol.json" <<EOF
+    spl-token create-token --decimals "$token_decimals" "$token_keypair_file" || return 1
+    spl-token create-account "$token_address" || echo -e "${YELLOW}Token account creation may have failed or already exists${NC}"
+
+    # Create on-chain metadata using metaboss
+    echo -e "${BLUE}Creating Metaplex metadata on-chain using metaboss...${NC}"
+    if ! command -v metaboss >/dev/null 2>&1; then
+        echo -e "${RED}metaboss not installed. Please install from https://github.com/samuelvanderwaal/metaboss/releases${NC}"
+        return 1
+    fi
+
+    local meta_temp_file=$(mktemp)
+    cat > "$meta_temp_file" <<EOF
+{
+  "name": "$token_name",
+  "symbol": "$token_symbol",
+  "uri": "$metadata_uri",
+  "seller_fee_basis_points": 0,
+  "creators": [],
+  "collection": null,
+  "uses": null
+}
+EOF
+
+    metaboss create metadata \
+        --keypair "$wallet_dir/keypair.json" \
+        --mint "$token_address" \
+        --metadata "$meta_temp_file"
+
+    local meta_status=$?
+    rm -f "$meta_temp_file"
+
+    if [ $meta_status -ne 0 ]; then
+        echo -e "${RED}Failed to create on-chain metadata with metaboss${NC}"
+    else
+        echo -e "${GREEN}✅ On-chain metadata created successfully with metaboss!${NC}"
+    fi
+
+    # Restore config
+    if [ "$current_keypair" != "none" ]; then
+        local original_keypair=$(echo "$current_keypair" | grep -o '"keypair":"[^"]*"' | cut -d '"' -f 4)
+        solana config set --keypair "$original_keypair"
+    fi
+
+    # Save token info locally
+    cat > "$wallet_dir/tokens/$token_symbol.json" <<EOF
 {
   "name": "$token_name",
   "symbol": "$token_symbol",
@@ -1017,28 +1037,9 @@ create_token_with_metadata() {
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
-        
-        echo -e "${GREEN}Enhanced token information saved${NC}"
-        echo -e "${BLUE}Token Summary:${NC}"
-        echo -e "  Name: $token_name"
-        echo -e "  Symbol: $token_symbol"
-        echo -e "  Address: $token_address"
-        echo -e "  Metadata URI: $metadata_uri"
-        if [ -n "$image_uri" ]; then
-            echo -e "  Image URI: $image_uri"
-        fi
-        
-    else
-        echo -e "${RED}Token creation failed: $token_output${NC}"
-    fi
-    
-    # Restore original configuration
-    if [ "$current_keypair" != "none" ]; then
-        local original_keypair=$(echo "$current_keypair" | grep -o '"keypair":"[^"]*"' | cut -d '"' -f 4)
-        solana config set --keypair "$original_keypair"
-    fi
-    
-    return $token_status
+
+    echo -e "${GREEN}Enhanced token information saved locally${NC}"
+    return 0
 }
 
 # Function to show token metadata

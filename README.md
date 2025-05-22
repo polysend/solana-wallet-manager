@@ -15,11 +15,47 @@ A comprehensive bash script for managing Solana wallets, addresses, tokens, and 
 
 ## Prerequisites
 
-- Solana CLI tools (`solana`, `solana-keygen`, `spl-token`)
-- Bash shell environment
+- **Solana CLI tools** (`solana`, `solana-keygen`, `spl-token`)
+- **Metaboss** - For creating Metaplex-compatible token metadata ([Install from releases](https://github.com/samuelvanderwaal/metaboss/releases))
+- **Bash shell environment**
 - **IPFS node access** (see IPFS Setup section below)
 - For local development: Docker with `solana-test-validator`
 - Optional: `jq` for better JSON formatting in metadata display
+
+### Installing Metaboss
+
+Metaboss is required for creating tokens with Metaplex-compatible metadata. Install it from the official releases:
+
+**macOS (Apple Silicon):**
+```bash
+curl -L https://github.com/samuelvanderwaal/metaboss/releases/download/v0.44.0/metaboss-macos-m1-latest -o metaboss
+chmod +x metaboss
+sudo mv metaboss /usr/local/bin/
+```
+
+**macOS (Intel):**
+```bash
+curl -L https://github.com/samuelvanderwaal/metaboss/releases/download/v0.44.0/metaboss-macos-latest -o metaboss
+chmod +x metaboss
+sudo mv metaboss /usr/local/bin/
+```
+
+**Linux:**
+```bash
+curl -L https://github.com/samuelvanderwaal/metaboss/releases/download/v0.44.0/metaboss-linux-latest -o metaboss
+chmod +x metaboss
+sudo mv metaboss /usr/local/bin/
+```
+
+**Windows:**
+Download the appropriate binary from [Metaboss Releases](https://github.com/samuelvanderwaal/metaboss/releases) and add it to your PATH.
+
+Verify installation:
+```bash
+metaboss --version
+```
+
+For other installation methods and the latest releases, see the [official Metaboss repository](https://github.com/samuelvanderwaal/metaboss).
 
 ## IPFS Requirements and Setup
 
@@ -237,7 +273,8 @@ You can also change the cluster at runtime without modifying the script:
 # 2. Create Metaplex-compatible metadata JSON
 # 3. Upload metadata JSON to IPFS  
 # 4. Create the SPL token
-# 5. Store all IPFS URIs for future reference
+# 5. Create on-chain metadata using metaboss
+# 6. Store all IPFS URIs for future reference
 ```
 
 ### Managing Recipients
@@ -479,6 +516,11 @@ Available clusters:
    spl-token create-account "$token_address"
    ```
 
+5. **Creating on-chain metadata**: Uses metaboss to create Metaplex-compatible metadata
+   ```bash
+   metaboss create metadata --keypair "$wallet_keypair" --mint "$token_address" --metadata "$metadata_file"
+   ```
+
 ### IPFS Upload Process
 
 1. **File validation**: Ensures file exists and is accessible
@@ -535,6 +577,10 @@ spl-token transfer --allow-unfunded-recipient --fund-recipient "$token_address" 
 5. **"Default signer required" error**:
    - The script will handle this automatically by temporarily setting your wallet as the default signer.
 
+6. **"metaboss not found"**:
+   - Install metaboss from the [official releases](https://github.com/samuelvanderwaal/metaboss/releases).
+   - Ensure metaboss is in your PATH and executable with `metaboss --version`.
+
 ### IPFS-Specific Issues
 
 1. **"Failed to upload to IPFS"**:
@@ -569,6 +615,11 @@ spl-token transfer --allow-unfunded-recipient --fund-recipient "$token_address" 
 
 3. **"Program metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s not found"**:
    - Your validator doesn't have the Metaplex program. Restart with cloning enabled.
+
+4. **"Failed to create on-chain metadata with metaboss"**:
+   - Ensure metaboss is installed and in your PATH
+   - Check that your validator has the Metaplex Token Metadata program
+   - Verify you have sufficient SOL for the metadata creation transaction
 
 ## Security Considerations
 
