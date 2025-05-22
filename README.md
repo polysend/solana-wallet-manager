@@ -65,7 +65,7 @@ For production use, consider services like:
 - Infura IPFS (https://infura.io/product/ipfs)
 - NFT.Storage (https://nft.storage)
 
-**Note**: Using external services requires modifying the upload functions to use their APIs instead of the local IPFS API calls.
+**Note**: Using external services requires modifying the upload functions to use their APIs instead of the local IPFS API calls. Additionally, MFS (Web UI organization) features will not work with external services - only basic upload/pinning functionality will be available.
 
 ### IPFS Configuration Notes
 
@@ -73,6 +73,8 @@ For production use, consider services like:
 - All uploads are automatically pinned to prevent garbage collection
 - The script maintains a local registry of uploads for human-readable naming
 - IPFS content is addressed by hash, ensuring immutability
+- **MFS (Mutable File System) directory structure is local only** - it organizes files in your IPFS Web UI but doesn't propagate to other nodes
+- Token metadata remains globally accessible via IPFS hashes regardless of local organization
 
 ## Installation
 
@@ -418,6 +420,7 @@ The script expects:
 - No authentication required (development setup)
 - Standard IPFS API endpoints (`/api/v0/add`, `/api/v0/pin/ls`, etc.)
 - Gateway accessible for content retrieval
+- **MFS (Mutable File System) support for Web UI organization** - works with standard IPFS nodes (go-ipfs/kubo) but not external services like Pinata
 
 ## Cluster Options
 
@@ -459,7 +462,10 @@ Available clusters:
 2. **Upload to IPFS**: Uses curl to POST to IPFS API
 3. **Pin content**: Automatically pins to prevent garbage collection
 4. **Registry update**: Adds entry to local registry with human-readable name
-5. **Return hash**: Provides IPFS hash for metadata creation
+5. **MFS organization**: Copies files to Web UI directory structure (local node only)
+6. **Return hash**: Provides IPFS hash for metadata creation
+
+**Important**: The MFS directory structure (`/solana-wallet-manager/uploads/`, `/solana-wallet-manager/tokens/`) only exists on your local IPFS node for Web UI organization. Other IPFS nodes and applications (like Metaplex) access content directly via IPFS hashes, ensuring global accessibility regardless of your local file organization.
 
 ### Token Transfer Process
 
@@ -524,6 +530,11 @@ spl-token transfer --allow-unfunded-recipient --fund-recipient "$token_address" 
 4. **"Image not displaying in wallets"**:
    - Ensure the IPFS gateway is publicly accessible if using external wallets
    - Some wallets may require HTTPS gateways for security
+
+5. **"Files don't appear in IPFS Web UI"**:
+   - Files uploaded via API don't automatically appear in the Web UI's Files section
+   - The script copies files to MFS for Web UI visibility in organized folders
+   - This organization is local to your node only and doesn't affect global accessibility
 
 ### Specific Solana CLI Errors
 
