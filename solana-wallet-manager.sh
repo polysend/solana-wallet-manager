@@ -689,12 +689,12 @@ ensure_mfs_directory() {
     local dir_check=$(curl -s -X POST "$IPFS_API_URL/api/v0/files/stat?arg=$dir_path" 2>/dev/null)
     
     if echo "$dir_check" | grep -q "file does not exist"; then
-        echo -e "${BLUE}Creating MFS directory: $dir_path${NC}"
+        echo -e "${BLUE}Creating MFS directory: $dir_path${NC}" >&2
         curl -s -X POST "$IPFS_API_URL/api/v0/files/mkdir?arg=$dir_path&parents=true" > /dev/null
         if [ $? -eq 0 ]; then
-            echo -e "${GREEN}MFS directory created: $dir_path${NC}"
+            echo -e "${GREEN}MFS directory created: $dir_path${NC}" >&2
         else
-            echo -e "${YELLOW}Warning: Failed to create MFS directory: $dir_path${NC}"
+            echo -e "${YELLOW}Warning: Failed to create MFS directory: $dir_path${NC}" >&2
         fi
     fi
 }
@@ -706,7 +706,7 @@ copy_to_webui() {
     local description="$3"
     
     if [ -z "$hash" ] || [ -z "$filename" ]; then
-        echo -e "${YELLOW}Warning: Cannot copy to Web UI - missing hash or filename${NC}"
+        echo -e "${YELLOW}Warning: Cannot copy to Web UI - missing hash or filename${NC}" >&2
         return 1
     fi
     
@@ -729,16 +729,16 @@ copy_to_webui() {
     # Use original filename as-is
     local mfs_path="$target_dir/$filename"
     
-    echo -e "${BLUE}Copying to Web UI as: $mfs_path${NC}"
+    echo -e "${BLUE}Copying to Web UI as: $mfs_path${NC}" >&2
     
     # Copy from IPFS to MFS (Web UI file system)
     local copy_result=$(curl -s -X POST "$IPFS_API_URL/api/v0/files/cp?arg=/ipfs/$hash&arg=$mfs_path" 2>&1)
     
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}File available in Web UI at: $mfs_path${NC}"
+        echo -e "${GREEN}File available in Web UI at: $mfs_path${NC}" >&2
         return 0
     else
-        echo -e "${YELLOW}Warning: Failed to copy to Web UI: $copy_result${NC}"
+        echo -e "${YELLOW}Warning: Failed to copy to Web UI: $copy_result${NC}" >&2
         return 1
     fi
 }
@@ -785,7 +785,7 @@ EOF
 # Function to upload file to IPFS
 upload_to_ipfs() {
     if [ -z "$1" ]; then
-        echo -e "${RED}Error: File path is required${NC}"
+        echo -e "${RED}Error: File path is required${NC}" >&2
         return 1
     fi
     
@@ -793,17 +793,17 @@ upload_to_ipfs() {
     local pin_name="$2"  # Optional name for the pin
     
     if [ ! -f "$file_path" ]; then
-        echo -e "${RED}Error: File '$file_path' not found${NC}"
+        echo -e "${RED}Error: File '$file_path' not found${NC}" >&2
         return 1
     fi
     
-    echo -e "${BLUE}Uploading $file_path to IPFS...${NC}"
+    echo -e "${BLUE}Uploading $file_path to IPFS...${NC}" >&2
     
     # Debug: Test IPFS connectivity first
     local ipfs_test=$(curl -s -X POST "$IPFS_API_URL/api/v0/version" 2>&1)
     if [ $? -ne 0 ] || [ -z "$ipfs_test" ]; then
-        echo -e "${RED}Error: Cannot connect to IPFS API at $IPFS_API_URL${NC}"
-        echo "Please check if IPFS is running and accessible"
+        echo -e "${RED}Error: Cannot connect to IPFS API at $IPFS_API_URL${NC}" >&2
+        echo "Please check if IPFS is running and accessible" >&2
         return 1
     fi
     
@@ -812,24 +812,24 @@ upload_to_ipfs() {
     
     # Debug output
     if [ -z "$response" ]; then
-        echo -e "${RED}Error: Empty response from IPFS API${NC}"
-        echo "Trying to connect to: $IPFS_API_URL/api/v0/add"
-        echo "Curl exit status: $upload_status"
+        echo -e "${RED}Error: Empty response from IPFS API${NC}" >&2
+        echo "Trying to connect to: $IPFS_API_URL/api/v0/add" >&2
+        echo "Curl exit status: $upload_status" >&2
         return 1
     fi
     
     if [ $upload_status -eq 0 ]; then
         local hash=$(echo "$response" | grep -o '"Hash":"[^"]*"' | cut -d '"' -f 4)
         if [ -n "$hash" ]; then
-            echo -e "${GREEN}File uploaded successfully!${NC}"
-            echo -e "${GREEN}IPFS Hash: $hash${NC}"
-            echo -e "${GREEN}Gateway URL: $IPFS_GATEWAY_URL/ipfs/$hash${NC}"
+            echo -e "${GREEN}File uploaded successfully!${NC}" >&2
+            echo -e "${GREEN}IPFS Hash: $hash${NC}" >&2
+            echo -e "${GREEN}Gateway URL: $IPFS_GATEWAY_URL/ipfs/$hash${NC}" >&2
             
             # Pin the content
             if [ -n "$pin_name" ]; then
-                echo -e "${BLUE}Pinning content (name stored locally): $pin_name${NC}"
+                echo -e "${BLUE}Pinning content (name stored locally): $pin_name${NC}" >&2
             else
-                echo -e "${BLUE}Pinning content...${NC}"
+                echo -e "${BLUE}Pinning content...${NC}" >&2
             fi
             curl -s -X POST "$IPFS_API_URL/api/v0/pin/add?arg=$hash" > /dev/null
             
@@ -839,24 +839,26 @@ upload_to_ipfs() {
             # Copy to Web UI for visibility
             copy_to_webui "$hash" "$(basename "$file_path")" "$pin_name"
             
+            # Output ONLY the hash to stdout (this is what gets captured)
             echo "$hash"
             return 0
         else
-            echo -e "${RED}Failed to extract hash from response${NC}"
-            echo "Response: $response"
+            echo -e "${RED}Failed to extract hash from response${NC}" >&2
+            echo "Response: $response" >&2
             return 1
         fi
     else
-        echo -e "${RED}Failed to upload file to IPFS${NC}"
-        echo "Response: $response"
+        echo -e "${RED}Failed to upload file to IPFS${NC}" >&2
+        echo "Response: $response" >&2
         return 1
     fi
 }
 
+
 # Function to upload text content to IPFS
 upload_text_to_ipfs() {
     if [ -z "$1" ]; then
-        echo -e "${RED}Error: Text content is required${NC}"
+        echo -e "${RED}Error: Text content is required${NC}" >&2
         return 1
     fi
     
@@ -864,7 +866,7 @@ upload_text_to_ipfs() {
     local filename="${2:-content.txt}"
     local pin_name="$3"  # Optional name for the pin
     
-    echo -e "${BLUE}Uploading text content to IPFS as $filename...${NC}"
+    echo -e "${BLUE}Uploading text content to IPFS as $filename...${NC}" >&2
     
     local response=$(echo "$content" | curl -s -X POST -F "file=@-;filename=$filename" "$IPFS_API_URL/api/v0/add")
     local upload_status=$?
@@ -872,15 +874,15 @@ upload_text_to_ipfs() {
     if [ $upload_status -eq 0 ]; then
         local hash=$(echo "$response" | grep -o '"Hash":"[^"]*"' | cut -d '"' -f 4)
         if [ -n "$hash" ]; then
-            echo -e "${GREEN}Content uploaded successfully!${NC}"
-            echo -e "${GREEN}IPFS Hash: $hash${NC}"
-            echo -e "${GREEN}Gateway URL: $IPFS_GATEWAY_URL/ipfs/$hash${NC}"
+            echo -e "${GREEN}Content uploaded successfully!${NC}" >&2
+            echo -e "${GREEN}IPFS Hash: $hash${NC}" >&2
+            echo -e "${GREEN}Gateway URL: $IPFS_GATEWAY_URL/ipfs/$hash${NC}" >&2
             
             # Pin the content (IPFS doesn't support named pins, so we just pin the hash)
             if [ -n "$pin_name" ]; then
-                echo -e "${BLUE}Pinning content (name stored locally): $pin_name${NC}"
+                echo -e "${BLUE}Pinning content (name stored locally): $pin_name${NC}" >&2
             else
-                echo -e "${BLUE}Pinning content...${NC}"
+                echo -e "${BLUE}Pinning content...${NC}" >&2
             fi
             curl -s -X POST "$IPFS_API_URL/api/v0/pin/add?arg=$hash" > /dev/null
             
@@ -890,18 +892,20 @@ upload_text_to_ipfs() {
             # Copy to Web UI for visibility
             copy_to_webui "$hash" "$filename" "$pin_name"
             
+            # Output ONLY the hash to stdout (this is what gets captured)
             echo "$hash"
             return 0
         else
-            echo -e "${RED}Failed to extract hash from response${NC}"
-            echo "Response: $response"
+            echo -e "${RED}Failed to extract hash from response${NC}" >&2
+            echo "Response: $response" >&2
             return 1
         fi
     else
-        echo -e "${RED}Failed to upload content to IPFS${NC}"
+        echo -e "${RED}Failed to upload content to IPFS${NC}" >&2
         return 1
     fi
 }
+
 
 # Function to list IPFS pins (original function preserved)
 list_ipfs_pins() {
@@ -961,6 +965,161 @@ EOF
 )
     
     echo "$metadata_json"
+}
+
+# Add these functions to your script after the create_token_metadata() function
+
+# Function to create token with full metadata
+create_token_with_metadata() {
+    if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ]; then
+        echo -e "${RED}Error: Token name, symbol, and decimals are required${NC}"
+        echo "Usage: create-token-with-metadata <name> <symbol> <decimals> [image_path] [description] [external_url]"
+        return 1
+    fi
+    
+    local token_name="$1"
+    local token_symbol="$2"
+    local token_decimals="$3"
+    local image_path="$4"
+    local description="${5:-A custom token created with Solana Wallet Manager}"
+    local external_url="$6"
+    
+    if [ -z "$CURRENT_WALLET" ]; then
+        echo -e "${RED}Error: No wallet selected. Use 'use-wallet <name>' first${NC}"
+        return 1
+    fi
+    
+    local wallet_dir="$WALLETS_DIR/$CURRENT_WALLET"
+    local image_uri=""
+    
+    echo -e "${BLUE}Creating token with metadata...${NC}"
+    
+    # Step 1: Upload image if provided
+    if [ -n "$image_path" ] && [ -f "$image_path" ]; then
+        echo -e "${BLUE}Step 1: Uploading image to IPFS...${NC}"
+        local image_hash=$(upload_to_ipfs "$image_path" "$token_symbol-image")
+        if [ $? -eq 0 ]; then
+            image_uri="$IPFS_GATEWAY_URL/ipfs/$image_hash"
+            echo -e "${GREEN}Image uploaded: $image_uri${NC}"
+        else
+            echo -e "${YELLOW}Warning: Failed to upload image, continuing without image${NC}"
+        fi
+    else
+        echo -e "${YELLOW}No image provided, creating token without image${NC}"
+    fi
+    
+    # Step 2: Create and upload metadata JSON
+    echo -e "${BLUE}Step 2: Creating and uploading metadata JSON...${NC}"
+    local metadata_json=$(create_token_metadata "$token_name" "$token_symbol" "$description" "$image_uri" "$external_url")
+    local metadata_hash=$(upload_text_to_ipfs "$metadata_json" "${token_symbol}_metadata.json" "$token_symbol-metadata")
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to upload metadata to IPFS${NC}"
+        return 1
+    fi
+    
+    local metadata_uri="$IPFS_GATEWAY_URL/ipfs/$metadata_hash"
+    echo -e "${GREEN}Metadata uploaded: $metadata_uri${NC}"
+    
+    # Step 3: Create the SPL token
+    echo -e "${BLUE}Step 3: Creating SPL token...${NC}"
+    
+    # First create the basic token (reuse existing function logic)
+    mkdir -p "$wallet_dir/tokens"
+    local token_keypair_file="$wallet_dir/tokens/${token_symbol}_keypair.json"
+    
+    # Generate token keypair
+    solana-keygen new -o "$token_keypair_file" --no-bip39-passphrase --force
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to generate token keypair${NC}"
+        return 1
+    fi
+    
+    local token_address=$(solana-keygen pubkey "$token_keypair_file")
+    
+    # Save current Solana configuration and set wallet keypair
+    local current_keypair=$(solana config get keypair -o json 2>/dev/null || echo "none")
+    solana config set --keypair "$wallet_dir/keypair.json"
+    
+    # Create the token
+    local token_output=$(spl-token create-token --decimals "$token_decimals" "$token_keypair_file" 2>&1)
+    local token_status=$?
+    
+    if [ $token_status -eq 0 ]; then
+        echo -e "${GREEN}SPL Token created successfully!${NC}"
+        echo -e "${GREEN}Token address: $token_address${NC}"
+        
+        # Create token account
+        spl-token create-account "$token_address" 2>/dev/null
+        
+        # Store enhanced token info with metadata
+        cat > "$wallet_dir/tokens/$token_symbol.json" <<EOF
+{
+  "name": "$token_name",
+  "symbol": "$token_symbol",
+  "decimals": $token_decimals,
+  "address": "$token_address",
+  "keypair": "${token_symbol}_keypair.json",
+  "metadata_uri": "$metadata_uri",
+  "image_uri": "$image_uri",
+  "description": "$description",
+  "external_url": "$external_url",
+  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+        
+        echo -e "${GREEN}Enhanced token information saved${NC}"
+        echo -e "${BLUE}Token Summary:${NC}"
+        echo -e "  Name: $token_name"
+        echo -e "  Symbol: $token_symbol"
+        echo -e "  Address: $token_address"
+        echo -e "  Metadata URI: $metadata_uri"
+        if [ -n "$image_uri" ]; then
+            echo -e "  Image URI: $image_uri"
+        fi
+        
+    else
+        echo -e "${RED}Token creation failed: $token_output${NC}"
+    fi
+    
+    # Restore original configuration
+    if [ "$current_keypair" != "none" ]; then
+        local original_keypair=$(echo "$current_keypair" | grep -o '"keypair":"[^"]*"' | cut -d '"' -f 4)
+        solana config set --keypair "$original_keypair"
+    fi
+    
+    return $token_status
+}
+
+# Function to show token metadata
+show_token_metadata() {
+    if [ -z "$1" ]; then
+        echo -e "${RED}Error: Token symbol is required${NC}"
+        return 1
+    fi
+    
+    local token="$1"
+    local wallet_name="${2:-$CURRENT_WALLET}"
+    
+    if [ -z "$wallet_name" ]; then
+        echo -e "${RED}Error: No wallet selected${NC}"
+        return 1
+    fi
+    
+    local wallet_dir="$WALLETS_DIR/$wallet_name"
+    local token_file="$wallet_dir/tokens/$token.json"
+    
+    if [ ! -f "$token_file" ]; then
+        echo -e "${RED}Error: Token '$token' not found in wallet '$wallet_name'${NC}"
+        return 1
+    fi
+    
+    echo -e "${BLUE}Token Metadata for $token:${NC}"
+    if command -v jq >/dev/null 2>&1; then
+        cat "$token_file" | jq .
+    else
+        cat "$token_file"
+    fi
 }
 
 
